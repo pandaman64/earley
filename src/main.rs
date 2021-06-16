@@ -246,7 +246,9 @@ fn recognize<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ct
                                 dot: prev_item.dot + 1,
                                 origin: prev_item.origin,
                             };
-                            new_items[i].insert(new_item);
+                            if !items[i].contains(&new_item) {
+                                new_items[i].insert(new_item);
+                            }
                         }
                     }
                     // scanning
@@ -257,7 +259,9 @@ fn recognize<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ct
                                 dot: item.dot + 1,
                                 origin: item.origin,
                             };
-                            new_items[i + s.len()].insert(new_item);
+                            if !items[i + s.len()].contains(&new_item) {
+                                new_items[i + s.len()].insert(new_item);
+                            }
                         }
                     }
                     // prediction
@@ -268,7 +272,9 @@ fn recognize<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ct
                                 dot: 0,
                                 origin: i,
                             };
-                            new_items[i].insert(new_item);
+                            if !items[i].contains(&new_item) {
+                                new_items[i].insert(new_item);
+                            }
                         }
                     }
                 }
