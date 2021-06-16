@@ -312,20 +312,12 @@ fn recognize<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ct
 fn main() {
     let ctx = Context::default();
 
-    let s = ctx.mk_nonterminal("S");
-    // let r1 = ctx.mk_rule(s, [Symbol::Terminal("a")]);
-    // let r2 = ctx.mk_rule(s, [Symbol::Terminal("b"), Symbol::Nonterminal(s)]);
-    // println!("{}\n{}", r1, r2);
+    let a = ctx.mk_nonterminal("A");
+    let b = ctx.mk_nonterminal("B");
+    let c = ctx.mk_nonterminal("C");
+    ctx.mk_rule(a, [Symbol::Nonterminal(b), Symbol::Nonterminal(c)]);
+    ctx.mk_rule(b, [Symbol::Terminal("b")]);
+    ctx.mk_rule(c, [Symbol::Terminal("c")]);
 
-    ctx.mk_rule(s, []);
-    ctx.mk_rule(
-        s,
-        [
-            Symbol::Terminal("("),
-            Symbol::Nonterminal(s),
-            Symbol::Terminal(")"),
-        ],
-    );
-
-    recognize("(())", &ctx, s);
+    recognize("bc", &ctx, a);
 }
