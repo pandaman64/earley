@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     hash::{Hash, Hasher},
     ops::Deref,
@@ -227,69 +227,58 @@ fn recognize<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ct
     }
 
     for i in 0..items.len() {
-        loop {
-            let mut new_items = vec![HashSet::new(); input.len() + 1];
+        let mut queue: VecDeque<_> = items[i].iter().cloned().collect();
 
-            for &item in items[i].iter() {
-                assert!(item.dot <= item.rule.body.len());
+        while let Some(item) = queue.pop_front() {
+            assert!(item.dot <= item.rule.body.len());
 
-                match item.rule.body.get(item.dot) {
-                    // completion
-                    None => {
-                        for prev_item in items[item.origin].iter().filter(|prev_item| {
-                            prev_item.dot < prev_item.rule.body.len()
-                                && prev_item.rule.body[prev_item.dot]
-                                    == Symbol::Nonterminal(item.rule.head)
-                        }) {
-                            let new_item = Item {
-                                rule: prev_item.rule,
-                                dot: prev_item.dot + 1,
-                                origin: prev_item.origin,
-                            };
-                            if !items[i].contains(&new_item) {
-                                new_items[i].insert(new_item);
-                            }
-                        }
-                    }
-                    // scanning
-                    Some(&Symbol::Terminal(s)) => {
-                        if input[i..].starts_with(s) {
-                            let new_item = Item {
-                                rule: item.rule,
-                                dot: item.dot + 1,
-                                origin: item.origin,
-                            };
-                            if !items[i + s.len()].contains(&new_item) {
-                                new_items[i + s.len()].insert(new_item);
-                            }
-                        }
-                    }
-                    // prediction
-                    Some(&Symbol::Nonterminal(n)) => {
-                        for &rule in rules.get(&n).unwrap() {
-                            let new_item = Item {
-                                rule,
-                                dot: 0,
-                                origin: i,
-                            };
-                            if !items[i].contains(&new_item) {
-                                new_items[i].insert(new_item);
-                            }
+            match item.rule.body.get(item.dot) {
+                // completion
+                None => {
+                    let (prev, current) = items.split_at_mut(i);
+                    for prev_item in prev[item.origin].iter().filter(|prev_item| {
+                        prev_item.dot < prev_item.rule.body.len()
+                            && prev_item.rule.body[prev_item.dot]
+                                == Symbol::Nonterminal(item.rule.head)
+                    }) {
+                        let new_item = Item {
+                            rule: prev_item.rule,
+                            dot: prev_item.dot + 1,
+                            origin: prev_item.origin,
+                        };
+                        if !current[0].contains(&new_item) {
+                            current[0].insert(new_item);
+                            queue.push_back(new_item);
                         }
                     }
                 }
-            }
-
-            let mut inserted = false;
-            for (old, new) in items.iter_mut().zip(new_items.into_iter()) {
-                for item in new.into_iter() {
-                    // if the item is not present in the old set, continue
-                    inserted = old.insert(item) || inserted;
+                // scanning
+                Some(&Symbol::Terminal(s)) => {
+                    if input[i..].starts_with(s) {
+                        let new_item = Item {
+                            rule: item.rule,
+                            dot: item.dot + 1,
+                            origin: item.origin,
+                        };
+                        if !items[i + s.len()].contains(&new_item) {
+                            items[i + s.len()].insert(new_item);
+                        }
+                    }
                 }
-            }
-
-            if !inserted {
-                break;
+                // prediction
+                Some(&Symbol::Nonterminal(n)) => {
+                    for &rule in rules.get(&n).unwrap() {
+                        let new_item = Item {
+                            rule,
+                            dot: 0,
+                            origin: i,
+                        };
+                        if !items[i].contains(&new_item) {
+                            items[i].insert(new_item);
+                            queue.push_back(new_item);
+                        }
+                    }
+                }
             }
         }
     }
