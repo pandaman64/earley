@@ -167,7 +167,7 @@ impl<'ctx> fmt::Display for Symbol<'ctx> {
         use Symbol::*;
 
         match self {
-            Terminal(c) => c.fmt(f),
+            Terminal(c) => write!(f, "'{}'", c),
             Nonterminal(n) => n.fmt(f),
         }
     }
@@ -355,8 +355,9 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
             match item.rule.body.get(item.dot) {
                 // completion
                 None => {
-                    let (prev, current) = items.split_at_mut(i);
-                    for prev_item in prev[item.origin].iter().filter(|prev_item| {
+                    let mut delta = vec![];
+
+                    for prev_item in items[item.origin].iter().filter(|prev_item| {
                         prev_item.dot < prev_item.rule.body.len()
                             && prev_item.rule.body[prev_item.dot]
                                 == Symbol::Nonterminal(item.rule.head)
@@ -366,11 +367,17 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
                             dot: prev_item.dot + 1,
                             origin: prev_item.origin,
                         };
-                        if !current[0].contains(&new_item) {
-                            current[0].insert(new_item);
+                        if !items[i].contains(&new_item) {
+                            // Since it's impossible to mutably borrow items[i] here,
+                            // we instead add the new_item to the temporary delta vec.
+                            // items[i].insert(new_item);
+                            delta.push(new_item);
+
                             queue.push_back(new_item);
                         }
                     }
+
+                    items[i].extend(delta);
                 }
                 // scanning
                 Some(&Symbol::Terminal(s)) => {
@@ -432,6 +439,7 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
         for (node, derivations) in graph.iter() {
             println!("[{}, {}, {}]:", node.nonterminal, node.start, node.end);
             for derivation in derivations.iter() {
+                print!("derivation = ");
                 let mut start = 0;
                 for symbol in derivation.iter().rev() {
                     match *symbol {
@@ -442,7 +450,7 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
                             start = n.end;
                         }
                         NodeSymbol::Terminal(t) => {
-                            print!("[{}, {}, {}]", t, start, start + t.len());
+                            print!("['{}', {}, {}]", t, start, start + t.len());
 
                             start += t.len();
                         }
@@ -461,18 +469,18 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
 
 fn main() {
     let ctx = Context::default();
-
-    // let a = ctx.mk_nonterminal("A");
-    // let b = ctx.mk_nonterminal("B");
-    // let c = ctx.mk_nonterminal("C");
-    // ctx.mk_rule(a, [Symbol::Nonterminal(b), Symbol::Nonterminal(c)]);
-    // ctx.mk_rule(b, [Symbol::Terminal("b")]);
-    // ctx.mk_rule(c, [Symbol::Terminal("c")]);
-
-    // parse("bc", &ctx, a);
-
     let a = ctx.mk_nonterminal("A");
-    ctx.mk_rule(a, []);
+    let b = ctx.mk_nonterminal("B");
+    let c = ctx.mk_nonterminal("C");
+    ctx.mk_rule(a, [Symbol::Nonterminal(b), Symbol::Nonterminal(c)]);
+    ctx.mk_rule(b, [Symbol::Terminal("b")]);
+    ctx.mk_rule(c, [Symbol::Terminal("c")]);
+    assert!(parse("bc", &ctx, a));
 
-    parse("aa", &ctx, a);
+    let ctx = Context::default();
+    let a = ctx.mk_nonterminal("A");
+    ctx.mk_rule(a, [Symbol::Terminal("a")]);
+    ctx.mk_rule(a, [Symbol::Nonterminal(a), Symbol::Nonterminal(a)]);
+    ctx.mk_rule(a, []);
+    assert!(parse("", &ctx, a));
 }
