@@ -214,7 +214,127 @@ impl<'ctx> fmt::Display for Item<'ctx> {
     }
 }
 
-fn recognize<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) -> bool {
+impl<'ctx> Item<'ctx> {
+    fn nonterminal(self) -> Nonterminal<'ctx> {
+        self.rule.head
+    }
+
+    fn is_completed(self) -> bool {
+        self.dot == self.rule.body.len()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Node<'ctx> {
+    nonterminal: Nonterminal<'ctx>,
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NodeSymbol<'ctx> {
+    Terminal(&'ctx str),
+    Nonterminal(Node<'ctx>),
+}
+
+fn construct_graph<'ctx>(
+    graph: &mut HashMap<Node<'ctx>, Vec<Vec<NodeSymbol<'ctx>>>>,
+    items: &[HashSet<Item<'ctx>>],
+    target: Node<'ctx>,
+    input: &str,
+) -> bool {
+    #[derive(Debug, PartialEq, Eq, Hash)]
+    struct State<'ctx> {
+        end: usize,
+        symbols: Vec<NodeSymbol<'ctx>>,
+    }
+
+    let derivations = match graph.get(&target) {
+        Some(_) => return true,
+        None => {
+            let mut derivations = vec![];
+
+            for &completed in items[target.end].iter().filter(|item| {
+                item.nonterminal() == target.nonterminal
+                    && item.is_completed()
+                    && target.start <= item.origin
+            }) {
+                let mut states = {
+                    let mut states = HashSet::new();
+                    states.insert(State {
+                        end: target.end,
+                        symbols: vec![],
+                    });
+                    states
+                };
+
+                for child in completed.rule.body.iter().rev() {
+                    if states.is_empty() {
+                        break;
+                    }
+
+                    match *child {
+                        Symbol::Nonterminal(n) => {
+                            let mut new_states = HashSet::new();
+                            for state in states.into_iter() {
+                                for item in items[state.end].iter().filter(|item| {
+                                    item.nonterminal() == n
+                                        && item.is_completed()
+                                        && target.start <= item.origin
+                                }) {
+                                    let child_target = Node {
+                                        nonterminal: n,
+                                        start: item.origin,
+                                        end: state.end,
+                                    };
+
+                                    if construct_graph(graph, items, child_target, input) {
+                                        let mut symbols = state.symbols.clone();
+                                        symbols.push(NodeSymbol::Nonterminal(child_target));
+                                        new_states.insert(State {
+                                            end: item.origin,
+                                            symbols,
+                                        });
+                                    }
+                                }
+                            }
+                            states = new_states;
+                        }
+                        Symbol::Terminal(t) => {
+                            states = states
+                                .into_iter()
+                                .filter_map(|mut state| {
+                                    if input.get((state.end - t.len())..state.end) == Some(t) {
+                                        state.end -= t.len();
+                                        state.symbols.push(NodeSymbol::Terminal(t));
+                                        Some(state)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                        }
+                    }
+                }
+
+                for state in states.into_iter().filter(|state| state.end == target.start) {
+                    derivations.push(state.symbols);
+                }
+            }
+
+            derivations
+        }
+    };
+
+    if derivations.is_empty() {
+        return false;
+    }
+
+    graph.insert(target, derivations);
+    true
+}
+
+fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) -> bool {
     let rules = ctx.rules();
     let mut items = vec![HashSet::new(); input.len() + 1];
     for &rule in rules.get(&start).unwrap() {
@@ -291,22 +411,68 @@ fn recognize<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ct
         println!();
     }
 
-    items
+    if items
         .last()
         .unwrap()
         .iter()
         .any(|item| item.origin == 0 && item.rule.head == start && item.dot == item.rule.body.len())
+    {
+        let mut graph = HashMap::new();
+        let recognize = construct_graph(
+            &mut graph,
+            &items,
+            Node {
+                nonterminal: start,
+                start: 0,
+                end: input.len(),
+            },
+            input,
+        );
+
+        for (node, derivations) in graph.iter() {
+            println!("[{}, {}, {}]:", node.nonterminal, node.start, node.end);
+            for derivation in derivations.iter() {
+                let mut start = 0;
+                for symbol in derivation.iter().rev() {
+                    match *symbol {
+                        NodeSymbol::Nonterminal(n) => {
+                            print!("[{}, {}, {}]", n.nonterminal, n.start, n.end);
+
+                            assert_eq!(start, n.start);
+                            start = n.end;
+                        }
+                        NodeSymbol::Terminal(t) => {
+                            print!("[{}, {}, {}]", t, start, start + t.len());
+
+                            start += t.len();
+                        }
+                    }
+                }
+                println!("\n");
+            }
+        }
+
+        assert!(recognize);
+        true
+    } else {
+        false
+    }
 }
 
 fn main() {
     let ctx = Context::default();
 
-    let a = ctx.mk_nonterminal("A");
-    let b = ctx.mk_nonterminal("B");
-    let c = ctx.mk_nonterminal("C");
-    ctx.mk_rule(a, [Symbol::Nonterminal(b), Symbol::Nonterminal(c)]);
-    ctx.mk_rule(b, [Symbol::Terminal("b")]);
-    ctx.mk_rule(c, [Symbol::Terminal("c")]);
+    // let a = ctx.mk_nonterminal("A");
+    // let b = ctx.mk_nonterminal("B");
+    // let c = ctx.mk_nonterminal("C");
+    // ctx.mk_rule(a, [Symbol::Nonterminal(b), Symbol::Nonterminal(c)]);
+    // ctx.mk_rule(b, [Symbol::Terminal("b")]);
+    // ctx.mk_rule(c, [Symbol::Terminal("c")]);
 
-    recognize("bc", &ctx, a);
+    // parse("bc", &ctx, a);
+
+    let a = ctx.mk_nonterminal("A");
+    ctx.mk_rule(a, []);
+
+    parse("aa", &ctx, a);
 }
