@@ -244,7 +244,7 @@ pub enum NodeSymbol<'ctx> {
 }
 
 fn construct_graph<'ctx>(
-    graph: &mut HashMap<Node<'ctx>, Vec<Vec<NodeSymbol<'ctx>>>>,
+    graph: &mut HashMap<Node<'ctx>, HashSet<Vec<NodeSymbol<'ctx>>>>,
     items: &[HashSet<Item<'ctx>>],
     target: Node<'ctx>,
     input: &str,
@@ -260,9 +260,9 @@ fn construct_graph<'ctx>(
         None => {
             println!("target = {}", target);
             // mark targed visited
-            graph.insert(target, vec![]);
+            graph.insert(target, HashSet::new());
 
-            let mut derivations = vec![];
+            let mut derivations = HashSet::new();
 
             for &completed in items[target.end].iter().filter(|item| {
                 item.nonterminal() == target.nonterminal
@@ -328,7 +328,7 @@ fn construct_graph<'ctx>(
                 }
 
                 for state in states.into_iter().filter(|state| state.end == target.start) {
-                    derivations.push(state.symbols);
+                    derivations.insert(state.symbols);
                 }
             }
 
