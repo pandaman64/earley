@@ -231,6 +231,12 @@ pub struct Node<'ctx> {
     end: usize,
 }
 
+impl<'ctx> fmt::Display for Node<'ctx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[{}, {}, {}]", self.nonterminal, self.start, self.end)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NodeSymbol<'ctx> {
     Terminal(&'ctx str),
@@ -252,6 +258,10 @@ fn construct_graph<'ctx>(
     let derivations = match graph.get(&target) {
         Some(_) => return true,
         None => {
+            println!("target = {}", target);
+            // mark targed visited
+            graph.insert(target, vec![]);
+
             let mut derivations = vec![];
 
             for &completed in items[target.end].iter().filter(|item| {
@@ -327,11 +337,14 @@ fn construct_graph<'ctx>(
     };
 
     if derivations.is_empty() {
-        return false;
+        // we marked target visited by inserting a dummy vec
+        // we remove the dummy here
+        graph.remove(&target);
+        false
+    } else {
+        graph.insert(target, derivations);
+        true
     }
-
-    graph.insert(target, derivations);
-    true
 }
 
 fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) -> bool {
@@ -437,14 +450,14 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
         );
 
         for (node, derivations) in graph.iter() {
-            println!("[{}, {}, {}]:", node.nonterminal, node.start, node.end);
+            println!("{}:", node);
             for derivation in derivations.iter() {
                 print!("derivation = ");
-                let mut start = 0;
+                let mut start = node.start;
                 for symbol in derivation.iter().rev() {
                     match *symbol {
                         NodeSymbol::Nonterminal(n) => {
-                            print!("[{}, {}, {}]", n.nonterminal, n.start, n.end);
+                            print!("{}", n);
 
                             assert_eq!(start, n.start);
                             start = n.end;
@@ -456,8 +469,9 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
                         }
                     }
                 }
-                println!("\n");
+                println!();
             }
+            println!();
         }
 
         assert!(recognize);
@@ -482,5 +496,5 @@ fn main() {
     ctx.mk_rule(a, [Symbol::Terminal("a")]);
     ctx.mk_rule(a, [Symbol::Nonterminal(a), Symbol::Nonterminal(a)]);
     ctx.mk_rule(a, []);
-    assert!(parse("", &ctx, a));
+    assert!(parse("aa", &ctx, a));
 }
