@@ -1,3 +1,5 @@
+use either::Either;
+use itertools::MultiProduct;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
@@ -225,13 +227,13 @@ impl<'ctx> Item<'ctx> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Node<'ctx> {
+pub struct NonterminalAt<'ctx> {
     nonterminal: Nonterminal<'ctx>,
     start: usize,
     end: usize,
 }
 
-impl<'ctx> fmt::Display for Node<'ctx> {
+impl<'ctx> fmt::Display for NonterminalAt<'ctx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[{}, {}, {}]", self.nonterminal, self.start, self.end)
     }
@@ -240,13 +242,113 @@ impl<'ctx> fmt::Display for Node<'ctx> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NodeSymbol<'ctx> {
     Terminal(&'ctx str),
-    Nonterminal(Node<'ctx>),
+    Nonterminal(NonterminalAt<'ctx>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Node<'ctx> {
+    symbol: NodeSymbol<'ctx>,
+    children: Vec<Node<'ctx>>,
+}
+
+impl<'ctx> fmt::Display for Node<'ctx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f, 0)
+    }
+}
+
+fn indent(f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+    for _ in 0..level {
+        write!(f, "  ")?;
+    }
+
+    Ok(())
+}
+
+impl<'ctx> Node<'ctx> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        // TODO: Terminal should carry position information
+        indent(f, level)?;
+        match self.symbol {
+            NodeSymbol::Terminal(t) => write!(f, "{}", t)?,
+            NodeSymbol::Nonterminal(n) => write!(f, "{}@{}..{}", n.nonterminal, n.start, n.end)?,
+        }
+
+        for child in self.children.iter() {
+            writeln!(f)?;
+            indent(f, level)?;
+            child.fmt(f, level + 1)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Derivations<'ctx> {
+    graph: HashMap<NonterminalAt<'ctx>, HashSet<Vec<NodeSymbol<'ctx>>>>,
+}
+
+impl<'ctx> Derivations<'ctx> {
+    fn iter_at(&'ctx self, nonterminal: NonterminalAt<'ctx>) -> Iter<'ctx> {
+        let derivations = self.graph.get(&nonterminal).unwrap();
+        Iter {
+            parent: self,
+            nonterminal,
+            children: None,
+            derivations: derivations.iter(),
+        }
+    }
+}
+
+/// Note that this iterator causes a stack overflow when there is a cycle in a derivation
+#[derive(Clone)]
+pub struct Iter<'ctx> {
+    parent: &'ctx Derivations<'ctx>,
+    nonterminal: NonterminalAt<'ctx>,
+    // the iterator of all permutations of the children for the current derivation
+    children: Option<MultiProduct<Either<std::iter::Once<Node<'ctx>>, Iter<'ctx>>>>,
+    // the remaining derivations
+    derivations: std::collections::hash_set::Iter<'ctx, Vec<NodeSymbol<'ctx>>>,
+}
+
+impl<'ctx> Iterator for Iter<'ctx> {
+    type Item = Node<'ctx>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use itertools::Itertools;
+        loop {
+            if let Some(children) = self.children.as_mut() {
+                if let Some(children) = children.next() {
+                    return Some(Node {
+                        symbol: NodeSymbol::Nonterminal(self.nonterminal),
+                        children,
+                    });
+                }
+            }
+
+            let current_derivation = self.derivations.next()?;
+            self.children = Some(
+                current_derivation
+                    .iter()
+                    .rev()
+                    .map(|symbol| match *symbol {
+                        NodeSymbol::Terminal(t) => Either::Left(std::iter::once(Node {
+                            symbol: NodeSymbol::Terminal(t),
+                            children: vec![],
+                        })),
+                        NodeSymbol::Nonterminal(n) => Either::Right(self.parent.iter_at(n)),
+                    })
+                    .multi_cartesian_product(),
+            );
+        }
+    }
 }
 
 fn construct_graph<'ctx>(
-    graph: &mut HashMap<Node<'ctx>, HashSet<Vec<NodeSymbol<'ctx>>>>,
+    graph: &mut HashMap<NonterminalAt<'ctx>, HashSet<Vec<NodeSymbol<'ctx>>>>,
     items: &[HashSet<Item<'ctx>>],
-    target: Node<'ctx>,
+    target: NonterminalAt<'ctx>,
     input: &str,
 ) -> bool {
     #[derive(Debug, PartialEq, Eq, Hash)]
@@ -292,7 +394,7 @@ fn construct_graph<'ctx>(
                                         && item.is_completed()
                                         && target.start <= item.origin
                                 }) {
-                                    let child_target = Node {
+                                    let child_target = NonterminalAt {
                                         nonterminal: n,
                                         start: item.origin,
                                         end: state.end,
@@ -347,7 +449,11 @@ fn construct_graph<'ctx>(
     }
 }
 
-fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) -> bool {
+fn parse<'ctx>(
+    input: &str,
+    ctx: &'ctx Context<'ctx>,
+    start: Nonterminal<'ctx>,
+) -> Option<Derivations<'ctx>> {
     let rules = ctx.rules();
     let mut items = vec![HashSet::new(); input.len() + 1];
     for &rule in rules.get(&start).unwrap() {
@@ -441,7 +547,7 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
         let recognize = construct_graph(
             &mut graph,
             &items,
-            Node {
+            NonterminalAt {
                 nonterminal: start,
                 start: 0,
                 end: input.len(),
@@ -475,9 +581,9 @@ fn parse<'ctx>(input: &str, ctx: &'ctx Context<'ctx>, start: Nonterminal<'ctx>) 
         }
 
         assert!(recognize);
-        true
+        Some(Derivations { graph })
     } else {
-        false
+        None
     }
 }
 
@@ -489,12 +595,19 @@ fn main() {
     ctx.mk_rule(a, [Symbol::Nonterminal(b), Symbol::Nonterminal(c)]);
     ctx.mk_rule(b, [Symbol::Terminal("b")]);
     ctx.mk_rule(c, [Symbol::Terminal("c")]);
-    assert!(parse("bc", &ctx, a));
+    let derivations = parse("bc", &ctx, a).unwrap();
+    for tree in derivations.iter_at(NonterminalAt {
+        nonterminal: a,
+        start: 0,
+        end: 2,
+    }) {
+        println!("{}", tree);
+    }
 
     let ctx = Context::default();
     let a = ctx.mk_nonterminal("A");
     ctx.mk_rule(a, [Symbol::Terminal("a")]);
     ctx.mk_rule(a, [Symbol::Nonterminal(a), Symbol::Nonterminal(a)]);
     ctx.mk_rule(a, []);
-    assert!(parse("aa", &ctx, a));
+    parse("aa", &ctx, a).unwrap();
 }
